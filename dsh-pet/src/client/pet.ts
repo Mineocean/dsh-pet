@@ -466,10 +466,10 @@ export function makePetUI(rt: {
           ? window.setTimeout(() => setWorkBubbleOn(false), BUBBLE_DURATION_MS)
           : null; // 非终态：常驻，不设自动收起
       }
-      // 循环语义：终态播一遍回 idle（once=true）；非终态单候选档位 once=false 无限循环；
-      // 非终态多候选档位 once=true 播一遍 → ended 由 handleEnded 护栏轮换到下一候选（长时间状态不单段重复）
-      const rotating = !terminal && Array.isArray(slot) && slot.length > 1;
-      setOnce(terminal || rotating);
+      // 循环语义：终态播一遍回 idle；非终态**一律 once=true**（含单候选档位）——
+      // 单候选动画播完由 handleEnded 护栏重播同一段（视觉等同循环），链始终有 ended 推进信号，
+      // 不再出现 once=false 无限循环 → ended 永不触发 → 动画链停摆的历史卡死。
+      setOnce(true);
       setAnim(name);
       // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [workStatusTick]);
@@ -670,8 +670,8 @@ export function makePetUI(rt: {
       console.log(
         '[dsh-pet] ' + new Date().toTimeString().slice(0, 8) + ' pet=' + cfg.id + ' 互动结束恢复状态动画: ' + name,
       );
-      // 多候选档位恢复后同样走 ended 轮换（once=true 播一遍 → 护栏换下一候选）；单候选/单动画维持无限循环
-      setOnce(Array.isArray(slot) && slot.length > 1);
+      // 恢复档位一律 once=true：多候选走 ended 轮换；单候选由护栏重播同一段（链不靠无限循环推进）
+      setOnce(true);
       setAnim(name);
       return true;
     };
@@ -707,7 +707,9 @@ export function makePetUI(rt: {
           setSeq((s) => s + 1);
           return;
         }
-        // 单候选/单动画档位（意外 ended：loop 被掐断/once 误置 true）：原护栏语义续播同一段
+        // 单候选/单动画档位：播完直接回卷重播（currentTime=0 + play），不经过 switchTo——
+        // 视觉等同原生 loop（无交叉淡入闪烁、无重新加载/网络请求），且每次播完仍触发 ended，
+        // 链始终以 ended 推进，不会停摆，也不依赖 fetch 可用性。
         if (poolIncludes(animations.events?.workStatus ?? [], animRef.current)) {
           console.log(
             '[dsh-pet] ' +
@@ -717,8 +719,11 @@ export function makePetUI(rt: {
               ' workStatus 循环续播: ' +
               animRef.current,
           );
-          setOnce(false);
-          setSeq((s) => s + 1);
+          const frontEl = evEl ?? (frontRef.current === 0 ? videoARef.current : videoBRef.current);
+          if (frontEl) {
+            frontEl.currentTime = 0;
+            frontEl.play().catch(() => {});
+          }
           return;
         }
       }
